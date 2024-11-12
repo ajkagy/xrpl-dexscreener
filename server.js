@@ -7,7 +7,8 @@ const Decimal = require('decimal.js');
 const xrpl_node = 'wss://s1.ripple.com/'
 
 const app = express();
-const port = process.env.PORT || 3000;
+app.set('trust proxy', 1);
+const port = process.env.PORT || 3005;
 
 const cache = new NodeCache({ stdTTL: 3600 }); // Cache for 1 hour
 
