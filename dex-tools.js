@@ -8,9 +8,18 @@ const xrpl_node = 'wss://s1.ripple.com/'
 
 const app = express();
 app.set('trust proxy', 1);
-const port = process.env.PORT || 3005;
+const port = process.env.PORT_DEX_TOOLS || 3005;
 
 const cache = new NodeCache({ stdTTL: 3600 }); // Cache for 1 hour
+
+
+function returnError(errorCode, message)
+{
+    return {
+        "code": errorCode,
+        "message": message
+      }
+}
 
 // Rate limiting
 const limiter = rateLimit({
@@ -52,7 +61,7 @@ const client = new xrpl.Client(xrpl_node);
 
     cache.set('latest-block', block);
     res.json(block);
-  } catch (error) { 
+  } catch (error) {
     console.error('Error fetching latest block:', error);
     res.status(500).json({ error: 'Internal server error' });
   } finally {
@@ -65,47 +74,73 @@ const client = new xrpl.Client(xrpl_node);
   }
 });
 
+app.get('/block', async (req, res) => {
+    const { number, timestamp } = req.query;
+    if(number != undefined)
+    {
+        const client = new xrpl.Client(xrpl_node);
+        try {
+          await client.connect();
+          const ledger = await client.request({
+            command: 'ledger',
+            ledger_index: number
+          });
+          await client.disconnect();
+      
+          const block = {
+            block: {
+              blockNumber: ledger.result.ledger_index,
+              blockTimestamp: xrpl.rippleTimeToUnixTime(ledger.result.ledger.close_time) / 1000
+            }
+          };
+      
+          res.json(block);
+        } catch (error) {
+          console.error('Error fetching block:', error);
+          res.status(500).json({ error: 'Internal server error' });
+        } finally {
+          if(client.isConnected)
+          {
+               try{
+                  await client.disconnect()
+              } catch(err) {}
+          }
+        }
+    } else {
+        res.status(404).json({ error: 'Block number undefined or timestamp not supported for the XRPL.' });
+    }
+    });
+
 app.get('/asset', async (req, res) => {
   const { id } = req.query;
-  const assetIds = Array.isArray(id) ? id : id.split(',');
-  const assets = [];
+  let returnAsset = {};
   const client = new xrpl.Client(xrpl_node);
   try {
     await client.connect();
 
-    for (const assetId of assetIds) {
-      const cachedAsset = cache.get(`asset-${assetId}`);
+      const cachedAsset = cache.get(`asset-${id}`);
       if (cachedAsset) {
-        assets.push(cachedAsset);
-        continue;
+        returnAsset = cachedAsset
       }
 
-      if (assetId === 'XRP') {
-        const xrpAsset = {
+      if (id === 'XRP') {
+        const xrpAsset = { asset: {
           id: 'XRP',
           name: 'XRP',
           symbol: 'XRP',
           totalSupply: '99987068281',
           circulatingSupply: '56811862950',
-          coinGeckoId: 'ripple',
-          coinMarketCapId: 'xrp'
-        };
-        assets.push(xrpAsset);
-        cache.set(`asset-${assetId}`, xrpAsset);
+        }};
+        cache.set(`asset-${id}`, xrpAsset);
+        returnAsset = xrpAsset
       } else {
-        const [currency, issuer] = assetId.split('.');
+        const [currency, issuer] = id.split('.');
         
         if (!currency || !issuer) {
-          assets.push({ id: assetId, error: 'Invalid asset ID format' });
-          continue;
+            returnAsset = returnError(404, "Invalid asset ID format")
         }
 
         try {
-          const accountInfo = await client.request({
-            command: 'account_info',
-            account: issuer
-          });
-
           const gatewayBalances = await client.request({
             command: 'gateway_balances',
             account: issuer,
@@ -116,39 +151,31 @@ app.get('/asset', async (req, res) => {
           {
             const totalSupply = gatewayBalances.result.obligations[currency] || '0';
 
-            const asset = {
-              id: assetId,
+            const asset = { asset: {
+              id: id,
               name: `${currency} (${issuer.slice(0, 8)}...)`,
               symbol: `${currency.length == 3 ? currency : xrpl.convertHexToString(currency).replace(/\x00/g, '')}`,
               totalSupply: totalSupply,
-              circulatingSupply: totalSupply,
-              metadata: {
-                issuer: issuer,
-                domain: accountInfo.result.account_data.Domain 
-                  ? Buffer.from(accountInfo.result.account_data.Domain, 'hex').toString('utf-8') 
-                  : undefined
-              }
-            };
-            assets.push(asset);
-            cache.set(`asset-${assetId}`, asset);
+              circulatingSupply: totalSupply
+            } };
+            cache.set(`asset-${id}`, asset);
+            returnAsset = asset
           } else {
-            console.error(`Error fetching asset ${assetId}:`, error);
-            assets.push({ id: assetId, error: 'Failed to fetch asset information' });
+            console.error(`Error fetching asset ${id}:`, error);
+            returnAsset = returnError(500, "Failed to fetch asset information")
           }
 
         } catch (error) {
-          console.error(`Error fetching asset ${assetId}:`, error);
-          assets.push({ id: assetId, error: 'Failed to fetch asset information' });
+          console.error(`Error fetching asset ${id}:`, error);
+          returnAsset = returnError(500, "Failed to fetch asset information")
         }
       }
-    }
-
+    
     await client.disconnect();
-
-    res.json({ assets });
+    res.json(returnAsset)
   } catch (error) {
     console.error('Error in asset endpoint:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json(returnError(500, "Internal server error"));
   } finally { 
     if(client.isConnected)
         {
@@ -158,6 +185,30 @@ app.get('/asset', async (req, res) => {
         }
   }
 });
+
+app.get('/exchange', async (req, res) => {
+    const { id } = req.query;
+    let returnAsset = {};
+    if(id != undefined)
+    {
+        if(id == 74920348)
+        {
+            returnAsset =  {
+                exchange: {
+                  factoryAddress: 74920348,
+                  name: "First Ledger",
+                  logoURL: "https://ipfs.firstledger.net/ipfs/QmZDEdDGDeGVAssWhu2Ho5LAjmr3YG3M1X18Kib2R55hzX"
+                }
+              }
+        } else {
+            returnAsset = returnError(404, "Exchange not found")
+        }
+
+        res.json(returnAsset)
+    } else {
+        res.status(404).json(returnError(404, "ID is undefined"));
+    }
+    });
 
 app.get('/pair', async (req, res) => {
   const { id } = req.query;
@@ -198,23 +249,20 @@ app.get('/pair', async (req, res) => {
 
           if(accountTxn.result.transactions.length < 1)
           {
-            return res.status(404).json({ error: 'Pair not found' });
+            return res.status(404).json(returnError(404, "Pair not found"));
           } 
 
         const firstTxn = accountTxn.result.transactions[0];
-        console.log(firstTxn)
 
     if (!firstTxn) {
-      return res.status(404).json({ error: 'Pair not found' });
+      return res.status(404).json(returnError(404, "Pair not found"));
     }
 
     const pair = {
       pair: {
         id: id,
-        dexKey: 'xrpl',
         asset0Id: base,
         asset1Id: quote,
-        feeBps: 10, // Standard XRPL DEX fee
         createdAtBlockNumber: firstTxn.tx_json.ledger_index,
         createdAtBlockTimestamp: xrpl.rippleTimeToUnixTime(firstTxn.tx_json.date) / 1000
       }
@@ -405,8 +453,8 @@ app.get('/events', async (req, res) => {
                         {
                             events.push({
                                 block: {
-                                blockNumber: i,
-                                blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
+                                    blockNumber: i,
+                                    blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
                                 },
                                 eventType: 'swap',
                                 txnId: txn_hash,
@@ -425,8 +473,8 @@ app.get('/events', async (req, res) => {
                         } else {
                             events.push({
                                 block: {
-                                blockNumber: i,
-                                blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
+                                    blockNumber: i,
+                                    blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
                                 },
                                 eventType: 'swap',
                                 txnId: txn_hash,
