@@ -4,7 +4,6 @@ const xrpl = require('xrpl');
 const rateLimit = require('express-rate-limit');
 const NodeCache = require('node-cache');
 const Decimal = require('decimal.js');
-const api = require('ripple-binary-codec')
 const xrpl_node = process.env.XRPL_NODE || 'wss://s1.ripple.com/'
 
 const app = express();
@@ -19,12 +18,6 @@ const port = process.env.PORT || 3005;
 //     max: 120 // limit each IP to 120 requests per min
 //   });
 //   app.use(limiter);
-
-function toHexString(byteArray) {
-    return Array.from(byteArray, function(byte) {
-      return ('0' + (byte & 0xFF).toString(16)).slice(-2);
-    }).join('')
-  }
 
 function returnError(errorCode, message)
 {
@@ -417,8 +410,7 @@ app.get('/events', async (req, res) => {
             command: 'ledger',
             ledger_index: blockNumber,
             transactions: true,
-            expand: true,
-            binary: true
+            expand: true
         })
     );
 
@@ -426,18 +418,14 @@ app.get('/events', async (req, res) => {
     
     const events = [];
 
-    const startTime = Date.now(); // Start timing
     for (const txns of ledgers) {
+
         const i = txns.result.ledger_index
 
       for (let j = 0; j < txns.result.ledger.transactions.length; j++) {
-        let t = txns.result.ledger.transactions[j];
-
-        const decodedMeta = api.decode(t.meta_blob);
-        const decodedTransaction = api.decode(t.tx_blob);
+        const t = txns.result.ledger.transactions[j];
         const txn_hash = txns.result.ledger.transactions[j].hash
-        const txn_json = decodedTransaction
-        t.meta = decodedMeta
+        const txn_json = txns.result.ledger.transactions[j].tx_json
         const transactionIndex = t.meta.TransactionResult
         const flags = txn_json.Flags    
         let isNoDirectRipple = false
@@ -970,8 +958,6 @@ app.get('/events', async (req, res) => {
 
       }
     }
-    const endTime = Date.now(); // End timing
-    console.log(` ${endTime - startTime}ms`);
     res.json({ events });
   } catch (error) {
     console.error('Error fetching events:', error);
