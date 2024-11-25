@@ -276,19 +276,18 @@ app.get('/exchange', async (req, res) => {
     let returnAsset = {};
     if(id != undefined)
     {
-        if(id == 74920348)
+        if(id == 'xrpl_exchange')
         {
             returnAsset =  {
                 exchange: {
-                  factoryAddress: 74920348,
-                  name: "First Ledger",
-                  logoURL: "https://ipfs.firstledger.net/ipfs/QmZDEdDGDeGVAssWhu2Ho5LAjmr3YG3M1X18Kib2R55hzX"
+                  factoryAddress: 'xrpl_exchange',
+                  name: "XRPL",
+                  logoURL: "https://ipfs.firstledger.net/ipfs/QmX7PQtC5mkodzJHytwmUiXAymCucApdHcHgFxJdJzgAmX"
                 }
               }
         } else {
             returnAsset = returnError(404, "Exchange not found")
         }
-
         res.json(returnAsset)
     } else {
         res.status(404).json(returnError(404, "ID is undefined"));
@@ -329,7 +328,7 @@ app.get('/pair', async (req, res) => {
               createdAtBlockNumber: firstTxn != undefined ? firstTxn.tx_json.ledger_index : 80000000,
               createdAtBlockTimestamp: firstTxn != undefined ? xrpl.rippleTimeToUnixTime(firstTxn.tx_json.date) / 1000 : 1684953531,
               createdAtTxnId: firstTxn != undefined ? firstTxn.hash : '',
-              factoryAddress: ''
+              factoryAddress: 'xrpl_exchange'
             }
           };
       
