@@ -474,7 +474,12 @@ app.get('/events', async (req, res) => {
                                        if(modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit && modifiedNode.FinalFields.LowLimit.issuer == txn_json.Account
                                            && takerPays.currency == modifiedNode.FinalFields.LowLimit.currency)
                                            {
-                                               takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)))
+                                                if(modifiedNode.PreviousFields == undefined)
+                                                {
+                                                    takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
+                                                } else {
+                                                    takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)))
+                                                }
 
                                                if(takerDiff < 1)
                                                {
@@ -505,7 +510,13 @@ app.get('/events', async (req, res) => {
                                                modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit && modifiedNode.FinalFields.HighLimit.issuer == txn_json.Account
                                                && takerPays.currency == modifiedNode.FinalFields.HighLimit.currency)
                                                {
-                                                   takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)))
+
+                                                    if(modifiedNode.PreviousFields == undefined)
+                                                    {
+                                                        takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
+                                                    } else {
+                                                        takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)))
+                                                    }
 
                                                    if(takerDiff < 1)
                                                    {
@@ -535,7 +546,13 @@ app.get('/events', async (req, res) => {
                                        if(modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit && modifiedNode.FinalFields.LowLimit.issuer == txn_json.Account
                                            && takerGets.currency == modifiedNode.FinalFields.LowLimit.currency)
                                            {
-                                               takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
+                                                if(modifiedNode.PreviousFields == undefined)
+                                                {
+                                                    takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
+                                                } else {
+                                                    takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
+                                                }
+
                                                if(takerDiff <= 0)
                                                {
                                                    break;
@@ -569,7 +586,12 @@ app.get('/events', async (req, res) => {
                                                modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit && modifiedNode.FinalFields.HighLimit.issuer == txn_json.Account
                                                && takerGets.currency == modifiedNode.FinalFields.HighLimit.currency)
                                                {
-                                                   takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
+                                                    if(modifiedNode.PreviousFields == undefined)
+                                                    {
+                                                        takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
+                                                    } else {
+                                                        takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
+                                                    }
 
                                                    if(takerDiff <= 0)
                                                    {
@@ -763,7 +785,12 @@ app.get('/events', async (req, res) => {
                                if(modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit && modifiedNode.FinalFields.LowLimit.issuer == txn_json.Account
                                    && txn_json.SendMax.currency == modifiedNode.FinalFields.LowLimit.currency)
                                    {
-                                       takerDiff = new Decimal(modifiedNode.PreviousFields.Balance.value).minus(new Decimal(modifiedNode.FinalFields.Balance.value))
+                                        if(modifiedNode.PreviousFields == undefined)
+                                        {
+                                            takerDiff = new Decimal(modifiedNode.FinalFields.Balance.value)
+                                        } else {
+                                            takerDiff = new Decimal(modifiedNode.PreviousFields.Balance.value).minus(new Decimal(modifiedNode.FinalFields.Balance.value))
+                                        }
                                        if(takerDiff > 0 && isNoDirectRipple == false)
                                        {
                                             offerExecuted = true;
@@ -773,7 +800,12 @@ app.get('/events', async (req, res) => {
                                        modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit && modifiedNode.FinalFields.HighLimit.issuer == txn_json.Account
                                        && txn_json.SendMax.currency == modifiedNode.FinalFields.HighLimit.currency)
                                        {
-                                           takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
+                                           if(modifiedNode.PreviousFields == undefined)
+                                           {
+                                                takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
+                                           } else {
+                                                takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
+                                           }
                                            if(takerDiff > 0 && isNoDirectRipple == false)
                                            {
                                                 offerExecuted = true;
@@ -866,7 +898,13 @@ app.get('/events', async (req, res) => {
                            {
                                if(modifiedNode.FinalFields && modifiedNode.FinalFields.Account == txn_json.Account)
                                {
-                                   volume = new Decimal(modifiedNode.PreviousFields.Balance).minus(new Decimal(modifiedNode.FinalFields.Balance)).minus(new Decimal(txn_json.Fee))
+                                    if(modifiedNode.PreviousFields == undefined)
+                                    {
+                                        volume = new Decimal(modifiedNode.FinalFields.Balance).minus(new Decimal(txn_json.Fee))
+                                    } else {
+                                        volume = new Decimal(modifiedNode.PreviousFields.Balance).minus(new Decimal(modifiedNode.FinalFields.Balance)).minus(new Decimal(txn_json.Fee))
+                                    }
+
                                    volume = new Decimal(volume).dividedBy(1000000)
                                    //Only show executed where volume is greater than 0
                                    if(volume > 0 && isNoDirectRipple == false)
