@@ -350,103 +350,105 @@ app.get('/pair', async (req, res) => {
         }
       });
 
-app.get('/events', async (req, res) => {
-    const { fromBlock, toBlock } = req.query;
-    const client = new xrpl.Client(xrpl_node);
-    try {
-      await client.connect();
+      app.get('/events', async (req, res) => {
+        const { fromBlock, toBlock } = req.query;
+        const client = new xrpl.Client(xrpl_node);
+        try {
+          await client.connect();
       
-      const events = [];
-  
-      for (let i = Number(fromBlock); i <= Number(toBlock); i++) {
-        const txns = await client.request({
-          command: 'ledger',
-          ledger_index: i,
-          transactions: true,
-          expand: true
-        });
-  
-        for (let j = 0; j < txns.result.ledger.transactions.length; j++) {
-          const t = txns.result.ledger.transactions[j];
-          const txn_hash = txns.result.ledger.transactions[j].hash
-          const txn_json = txns.result.ledger.transactions[j].tx_json
-          const flags = txn_json.Flags    
-          let isNoDirectRipple = false
-  
-          if(flags != undefined)
-          {
-              isNoDirectRipple = checktfNoRippleDirectEnabled(flags)
+          const blockNumbers = [];
+          for (let i = Number(fromBlock); i <= Number(toBlock); i++) {
+              blockNumbers.push(i);
           }
-  
-          if(t.meta.TransactionResult == 'tesSUCCESS' && txn_json.TransactionType == 'OfferCreate')
+          const ledgerPromises = blockNumbers.map(blockNumber => 
+              client.request({
+                  command: 'ledger',
+                  ledger_index: blockNumber,
+                  transactions: true,
+                  expand: true
+              })
+          );
+      
+          const ledgers = await Promise.all(ledgerPromises);
+          
+          const events = [];
+      
+          for (const txns of ledgers) {
+      
+              const i = txns.result.ledger_index
+      
+            for (let j = 0; j < txns.result.ledger.transactions.length; j++) {
+              const t = txns.result.ledger.transactions[j];
+              const txn_hash = txns.result.ledger.transactions[j].hash
+              const txn_json = txns.result.ledger.transactions[j].tx_json
+              const transactionIndex = t.meta.TransactionIndex
+              const flags = txn_json.Flags    
+              let isNoDirectRipple = false
+              let ammAccount = '';
+              let ammXrpBalance = '';
+      
+              const ammNodes = findAMMIDModifiedNodes(t)
+              let numberOfAMMNodes = ammNodes != undefined ? ammNodes.length : 0;
+             try{
+                  if(numberOfAMMNodes == 1)
+                  {
+                      ammAccount = ammNodes[0].ModifiedNode.FinalFields.Account
+                      ammXrpBalance = ammNodes[0].ModifiedNode.FinalFields.Balance
+                  }
+              } catch(err)
               {
-                     const affectedNodes = t.meta.AffectedNodes
-                     let offerExecuted = false;
-                     let volume;
-                     let price;
-                     let issuer = '';
-                     let currency = '';
-                     let takerDiff;
-                     let type = '';
-                         for (const node of affectedNodes) {
-                             // Look for ModifiedNode or DeletedNode related to an Offer
-                             const modifiedNode = node.ModifiedNode;
-  
-                             if(modifiedNode && modifiedNode.LedgerEntryType == 'RippleState')
-                                 {
-                                     const takerGets = txn_json.TakerGets;
-                                     const takerPays = txn_json.TakerPays;
-  
-                                     if(typeof takerPays == 'object' && typeof takerGets == 'string')
+                  numberOfAMMNodes = 0
+              }
+      
+              if(flags != undefined)
+              {
+                  isNoDirectRipple = checktfNoRippleDirectEnabled(flags)
+              }
+      
+              if(t.meta.TransactionResult == 'tesSUCCESS' && txn_json.TransactionType == 'OfferCreate')
+                  {
+                         const affectedNodes = t.meta.AffectedNodes
+                         let offerExecuted = false;
+                         let volume;
+                         let price;
+                         let issuer = '';
+                         let currency = '';
+                         let takerDiff;
+                         let type = '';
+                             for (const node of affectedNodes) {
+                                 // Look for ModifiedNode or DeletedNode related to an Offer
+                                 const modifiedNode = node.ModifiedNode;
+      
+                                 if(modifiedNode && modifiedNode.LedgerEntryType == 'RippleState')
                                      {
-                                         if(modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit && modifiedNode.FinalFields.LowLimit.issuer == txn_json.Account
-                                             && takerPays.currency == modifiedNode.FinalFields.LowLimit.currency)
-                                             {
-                                                 takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)))
-  
-                                                 if(takerDiff < 1)
+                                         const takerGets = txn_json.TakerGets;
+                                         const takerPays = txn_json.TakerPays;
+      
+                                         if(typeof takerPays == 'object' && typeof takerGets == 'string')
+                                         {
+                                             if(modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit && modifiedNode.FinalFields.LowLimit.issuer == txn_json.Account
+                                                 && takerPays.currency == modifiedNode.FinalFields.LowLimit.currency)
                                                  {
-                                                     break;
-                                                 }
-  
-                                                 const accountRootNode = affectedNodes.filter(nodeA => {
-                                                     return nodeA.ModifiedNode != undefined && nodeA.ModifiedNode.LedgerEntryType != undefined && nodeA.ModifiedNode.LedgerEntryType === "AccountRoot" && nodeA.ModifiedNode.FinalFields != undefined && nodeA.ModifiedNode.FinalFields.Account != undefined && nodeA.ModifiedNode.FinalFields.Account != undefined && nodeA.ModifiedNode.FinalFields.Account == txn_json.Account;
-                                                 });
-  
-                                                 if(accountRootNode != undefined && accountRootNode.length > 0)
-                                                 {
-                                                     const acctRootNode = accountRootNode[0].ModifiedNode
-  
-                                                     offerExecuted = true;
-                                                     type = 'Buy'
-                                                     volume = new Decimal(acctRootNode.PreviousFields.Balance).minus(new Decimal(acctRootNode.FinalFields.Balance)).minus(new Decimal(txn_json.Fee))
-                                                     volume = new Decimal(volume).dividedBy(1000000)
-                                                     price = new Decimal(volume).dividedBy(takerDiff)
-                                                     issuer = takerPays.issuer;
-                                                     currency = takerPays.currency;
-                                                     ticker_normalized = currency.length > 3 ? xrpl.convertHexToString(currency).replace(/\x00/g, '') : currency;
-                                                     
-                                                     break;
-                                                 }
-  
-                                             } else if (
-                                                 modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit && modifiedNode.FinalFields.HighLimit.issuer == txn_json.Account
-                                                 && takerPays.currency == modifiedNode.FinalFields.HighLimit.currency)
-                                                 {
-                                                     takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)))
-  
+                                                      if(modifiedNode.PreviousFields == undefined)
+                                                      {
+                                                          takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
+                                                      } else {
+                                                          takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)))
+                                                      }
+      
                                                      if(takerDiff < 1)
                                                      {
                                                          break;
                                                      }
+      
                                                      const accountRootNode = affectedNodes.filter(nodeA => {
-                                                         return nodeA.ModifiedNode != undefined && nodeA.ModifiedNode.LedgerEntryType != undefined && nodeA.ModifiedNode.LedgerEntryType === "AccountRoot" && nodeA.ModifiedNode.FinalFields != undefined && nodeA.ModifiedNode.FinalFields.Account != undefined && nodeA.ModifiedNode.FinalFields.Account == txn_json.Account;
+                                                         return nodeA.ModifiedNode != undefined && nodeA.ModifiedNode.LedgerEntryType != undefined && nodeA.ModifiedNode.LedgerEntryType === "AccountRoot" && nodeA.ModifiedNode.FinalFields != undefined && nodeA.ModifiedNode.FinalFields.Account != undefined && nodeA.ModifiedNode.FinalFields.Account != undefined && nodeA.ModifiedNode.FinalFields.Account == txn_json.Account;
                                                      });
-  
+      
                                                      if(accountRootNode != undefined && accountRootNode.length > 0)
                                                      {
                                                          const acctRootNode = accountRootNode[0].ModifiedNode
-  
+      
                                                          offerExecuted = true;
                                                          type = 'Buy'
                                                          volume = new Decimal(acctRootNode.PreviousFields.Balance).minus(new Decimal(acctRootNode.FinalFields.Balance)).minus(new Decimal(txn_json.Fee))
@@ -455,70 +457,76 @@ app.get('/events', async (req, res) => {
                                                          issuer = takerPays.issuer;
                                                          currency = takerPays.currency;
                                                          ticker_normalized = currency.length > 3 ? xrpl.convertHexToString(currency).replace(/\x00/g, '') : currency;
+                                                         
                                                          break;
                                                      }
-                                                 }
-                                     } else if (typeof takerPays == 'string' && typeof takerGets == 'object')
-                                     {
-                                         if(modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit && modifiedNode.FinalFields.LowLimit.issuer == txn_json.Account
-                                             && takerGets.currency == modifiedNode.FinalFields.LowLimit.currency)
-                                             {
-                                                 takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
-                                                 if(takerDiff <= 0)
+      
+                                                 } else if (
+                                                     modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit && modifiedNode.FinalFields.HighLimit.issuer == txn_json.Account
+                                                     && takerPays.currency == modifiedNode.FinalFields.HighLimit.currency)
+                                                     {
+      
+                                                          if(modifiedNode.PreviousFields == undefined)
+                                                          {
+                                                              takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
+                                                          } else {
+                                                              takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)))
+                                                          }
+      
+                                                         if(takerDiff < 1)
+                                                         {
+                                                             break;
+                                                         }
+                                                         const accountRootNode = affectedNodes.filter(nodeA => {
+                                                             return nodeA.ModifiedNode != undefined && nodeA.ModifiedNode.LedgerEntryType != undefined && nodeA.ModifiedNode.LedgerEntryType === "AccountRoot" && nodeA.ModifiedNode.FinalFields != undefined && nodeA.ModifiedNode.FinalFields.Account != undefined && nodeA.ModifiedNode.FinalFields.Account == txn_json.Account;
+                                                         });
+      
+                                                         if(accountRootNode != undefined && accountRootNode.length > 0)
+                                                         {
+                                                             const acctRootNode = accountRootNode[0].ModifiedNode
+      
+                                                             offerExecuted = true;
+                                                             type = 'Buy'
+                                                             volume = new Decimal(acctRootNode.PreviousFields.Balance).minus(new Decimal(acctRootNode.FinalFields.Balance)).minus(new Decimal(txn_json.Fee))
+                                                             volume = new Decimal(volume).dividedBy(1000000)
+                                                             price = new Decimal(volume).dividedBy(takerDiff)
+                                                             issuer = takerPays.issuer;
+                                                             currency = takerPays.currency;
+                                                             ticker_normalized = currency.length > 3 ? xrpl.convertHexToString(currency).replace(/\x00/g, '') : currency;
+                                                             break;
+                                                         }
+                                                     }
+                                         } else if (typeof takerPays == 'string' && typeof takerGets == 'object')
+                                         {
+                                             if(modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit && modifiedNode.FinalFields.LowLimit.issuer == txn_json.Account
+                                                 && takerGets.currency == modifiedNode.FinalFields.LowLimit.currency)
                                                  {
-                                                     break;
-                                                 }
-                                                 const accountRootNode = affectedNodes.filter(node => {
-                                                  return node.ModifiedNode != undefined && node.ModifiedNode.LedgerEntryType != undefined && node.ModifiedNode.LedgerEntryType === "AccountRoot" && node.ModifiedNode.FinalFields != undefined && node.ModifiedNode.FinalFields.Account != undefined && node.ModifiedNode.FinalFields.Account == txn_json.Account;
-                                                 });
-  
-                                                 if(accountRootNode != undefined && accountRootNode.length > 0)
-                                                 {
-                                                     const acctRootNode = accountRootNode[0].ModifiedNode
-                                                     type = 'Sell'
-                                                     if(acctRootNode.PreviousFields.Balance == undefined)
+                                                      if(modifiedNode.PreviousFields == undefined)
                                                       {
-                                                       volume = txn_json.Fee
+                                                          takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
                                                       } else {
-                                                       volume = new Decimal(acctRootNode.FinalFields.Balance).minus(new Decimal(acctRootNode.PreviousFields.Balance)).plus(new Decimal(txn_json.Fee))
+                                                          takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
                                                       }
-  
-                                                     if(volume < 1){break;}
-                                                     volume = new Decimal(volume).dividedBy(1000000)
-                                                     price = new Decimal(volume).dividedBy(takerDiff)
-                                                     issuer = takerGets.issuer;
-                                                     currency = takerGets.currency;
-                                                     ticker_normalized = currency.length > 3 ? xrpl.convertHexToString(currency).replace(/\x00/g, '') : currency;
-                                                     offerExecuted = true;
-                                                     break;
-                                                 }
-  
-                                             } else if (
-                                                 modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit && modifiedNode.FinalFields.HighLimit.issuer == txn_json.Account
-                                                 && takerGets.currency == modifiedNode.FinalFields.HighLimit.currency)
-                                                 {
-                                                     takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
-  
+      
                                                      if(takerDiff <= 0)
                                                      {
-                                                             break;
+                                                         break;
                                                      }
-  
                                                      const accountRootNode = affectedNodes.filter(node => {
                                                       return node.ModifiedNode != undefined && node.ModifiedNode.LedgerEntryType != undefined && node.ModifiedNode.LedgerEntryType === "AccountRoot" && node.ModifiedNode.FinalFields != undefined && node.ModifiedNode.FinalFields.Account != undefined && node.ModifiedNode.FinalFields.Account == txn_json.Account;
                                                      });
-  
+      
                                                      if(accountRootNode != undefined && accountRootNode.length > 0)
                                                      {
                                                          const acctRootNode = accountRootNode[0].ModifiedNode
                                                          type = 'Sell'
                                                          if(acctRootNode.PreviousFields.Balance == undefined)
-                                                         {
+                                                          {
                                                            volume = txn_json.Fee
-                                                         } else {
+                                                          } else {
                                                            volume = new Decimal(acctRootNode.FinalFields.Balance).minus(new Decimal(acctRootNode.PreviousFields.Balance)).plus(new Decimal(txn_json.Fee))
-                                                         }
-  
+                                                          }
+      
                                                          if(volume < 1){break;}
                                                          volume = new Decimal(volume).dividedBy(1000000)
                                                          price = new Decimal(volume).dividedBy(takerDiff)
@@ -528,76 +536,298 @@ app.get('/events', async (req, res) => {
                                                          offerExecuted = true;
                                                          break;
                                                      }
-                                                 }
+      
+                                                 } else if (
+                                                     modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit && modifiedNode.FinalFields.HighLimit.issuer == txn_json.Account
+                                                     && takerGets.currency == modifiedNode.FinalFields.HighLimit.currency)
+                                                     {
+                                                          if(modifiedNode.PreviousFields == undefined)
+                                                          {
+                                                              takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
+                                                          } else {
+                                                              takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
+                                                          }
+      
+                                                         if(takerDiff <= 0)
+                                                         {
+                                                                 break;
+                                                         }
+      
+                                                         const accountRootNode = affectedNodes.filter(node => {
+                                                          return node.ModifiedNode != undefined && node.ModifiedNode.LedgerEntryType != undefined && node.ModifiedNode.LedgerEntryType === "AccountRoot" && node.ModifiedNode.FinalFields != undefined && node.ModifiedNode.FinalFields.Account != undefined && node.ModifiedNode.FinalFields.Account == txn_json.Account;
+                                                         });
+      
+                                                         if(accountRootNode != undefined && accountRootNode.length > 0)
+                                                         {
+                                                             const acctRootNode = accountRootNode[0].ModifiedNode
+                                                             type = 'Sell'
+                                                             if(acctRootNode.PreviousFields.Balance == undefined)
+                                                             {
+                                                               volume = txn_json.Fee
+                                                             } else {
+                                                               volume = new Decimal(acctRootNode.FinalFields.Balance).minus(new Decimal(acctRootNode.PreviousFields.Balance)).plus(new Decimal(txn_json.Fee))
+                                                             }
+      
+                                                             if(volume < 1){break;}
+                                                             volume = new Decimal(volume).dividedBy(1000000)
+                                                             price = new Decimal(volume).dividedBy(takerDiff)
+                                                             issuer = takerGets.issuer;
+                                                             currency = takerGets.currency;
+                                                             ticker_normalized = currency.length > 3 ? xrpl.convertHexToString(currency).replace(/\x00/g, '') : currency;
+                                                             offerExecuted = true;
+                                                             break;
+                                                         }
+                                                     }
+                                         }
                                      }
-                                 }
-                           }
+                               }
+                         
                      
-                 
-                     if (offerExecuted) {
-                          if(type == 'Buy')
-                          {
-                              //Try to get AMM info, if no pool, then fallback on priceNative
-                              let reserveAsset0 = '0'
-                              let reserveAsset1 = '0'
-                              try{
-                                  const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
-                                  if(ammInfo && ammInfo.result && ammInfo.result.amm)
-                                  {
-                                      const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
-                                      const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
-                                      price = new Decimal(xrpAmount).dividedBy(tokenAmount)
-                                      reserveAsset1 = xrpAmount.toString()
-                                      reserveAsset0 = tokenAmount.toString()
-                                     // console.log('AMM price: ', price)
-                                  }  
-                              } catch(err){}
-  
-                              events.push({
+                         if (offerExecuted) {
+                              if(type == 'Buy')
+                              {
+                                  //Try to get AMM info, if no pool, then fallback on priceNative
+                                  let reserveAsset0 = '0'
+                                  let reserveAsset1 = '0'
+                                  try{
+                                      if(numberOfAMMNodes == 1)
+                                      {
+                                          const highLimitTokenBalanceNode = findModifiedNodesByHighLowLimit(t, currency, ammAccount)
+                                          if(highLimitTokenBalanceNode.length == 1)
+                                          {
+                                              const xrpAmount = new Decimal(ammXrpBalance).dividedBy(1000000)
+                                              const tokenAmount = new Decimal(Math.abs(highLimitTokenBalanceNode[0].Balance.value))
+                                              price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                              reserveAsset1 = xrpAmount.toString()
+                                              reserveAsset0 = tokenAmount.toString()
+                                          } else {
+                                             // console.log('amm hit', numberOfAMMNodes, currency, ammAccount)
+                                             // console.log(txn_hash)
+                                              const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                              if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                              {
+                                                  const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                                  const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                                  price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                                  reserveAsset1 = xrpAmount.toString()
+                                                  reserveAsset0 = tokenAmount.toString()
+                                              } 
+                                          }
+                                      } else if (numberOfAMMNodes > 1) {
+                                         // console.log('amm hit', numberOfAMMNodes)
+                                          const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                          if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                          {
+                                              const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                              const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                              price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                              reserveAsset1 = xrpAmount.toString()
+                                              reserveAsset0 = tokenAmount.toString()
+                                          } 
+                                      } else {
+                                          //crosses dex and not AMM (skip)
+                                      }
+                                  } catch(err){console.log(err)}
+      
+                                  events.push({
+                                      block: {
+                                      blockNumber: i,
+                                      blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
+                                      },
+                                      eventType: 'swap',
+                                      txnId: txn_hash,
+                                      txnIndex: transactionIndex,
+                                      eventIndex: 0,
+                                      maker: txn_json.Account,
+                                      pairId: currency + '.' + issuer + '_XRP',
+                                      asset1In: normalizeScientificNotation(volume.toString()),
+                                      asset0Out: normalizeScientificNotation(takerDiff.toString()),
+                                      priceNative: normalizeScientificNotation(price.toString()),
+                                      reserves: {
+                                      asset0: normalizeScientificNotation(reserveAsset0),
+                                      asset1: normalizeScientificNotation(reserveAsset1)
+                                      }
+                                  });
+                              } else {
+      
+                                  //Try to get AMM info, if no pool, then fallback on priceNative
+                                  let reserveAsset0 = '0'
+                                  let reserveAsset1 = '0'
+                                  try{
+                                      if(numberOfAMMNodes == 1)
+                                      {
+                                          const highLimitTokenBalanceNode = findModifiedNodesByHighLowLimit(t, currency, ammAccount)
+                                          if(highLimitTokenBalanceNode.length == 1)
+                                          {
+                                              const xrpAmount = new Decimal(ammXrpBalance).dividedBy(1000000)
+                                              const tokenAmount = new Decimal(Math.abs(highLimitTokenBalanceNode[0].Balance.value))
+                                              price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                              reserveAsset1 = xrpAmount.toString()
+                                              reserveAsset0 = tokenAmount.toString()
+                                          } else {
+                                             // console.log('amm hit', numberOfAMMNodes, currency, ammAccount)
+                                           //  console.log(txn_hash)
+                                              const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                              if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                              {
+                                                  const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                                  const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                                  price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                                  reserveAsset1 = xrpAmount.toString()
+                                                  reserveAsset0 = tokenAmount.toString()
+                                              } 
+                                          }
+                                      } else if (numberOfAMMNodes > 1) {
+                                          //console.log('amm hit', numberOfAMMNodes)
+                                          const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                          if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                          {
+                                              const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                              const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                              price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                              reserveAsset1 = xrpAmount.toString()
+                                              reserveAsset0 = tokenAmount.toString()
+                                          } 
+                                      } else {
+                                          //crosses dex and not AMM (skip)
+                                      }
+                                  } catch(err){console.log(err)}
+      
+                                  events.push({
+                                      block: {
+                                      blockNumber: i,
+                                      blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
+                                      },
+                                      eventType: 'swap',
+                                      txnId: txn_hash,
+                                      txnIndex: transactionIndex,
+                                      eventIndex: 0,
+                                      maker: txn_json.Account,
+                                      pairId:  currency + '.' + issuer + '_XRP',
+                                      asset0In: normalizeScientificNotation(takerDiff.toString()),
+                                      asset1Out: normalizeScientificNotation(volume.toString()),
+                                      priceNative: normalizeScientificNotation(price.toString()),
+                                      reserves: {
+                                      asset0: normalizeScientificNotation(reserveAsset0),
+                                      asset1: normalizeScientificNotation(reserveAsset1)
+                                      }
+                                  });
+                              }
+                         }
+                  }
+      
+                  if(txn_json.TransactionType == 'Payment' && t.meta.TransactionResult == 'tesSUCCESS')
+                  {
+      
+                     let offerExecuted = false;
+                     let volume;
+                     let price;
+                     let issuer = '';
+                     let currency = '';
+                     let takerDiff;
+      
+                     if(txn_json.Account == txn_json.Destination)
+                     {
+                         if(t.meta.DeliveredAmount && typeof t.meta.DeliveredAmount == 'string' && typeof txn_json.SendMax == 'object')
+                         {
+                             volume = new Decimal(t.meta.DeliveredAmount).dividedBy(1000000);
+                             //Now find the amount of token that was exchanged
+                             const affectedNodes = t.meta.AffectedNodes
+                             for (const node of affectedNodes) {
+                                 const modifiedNode = node.ModifiedNode;
+                                 if(modifiedNode && modifiedNode.LedgerEntryType == 'RippleState')
+                                 {
+                                     if(modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit && modifiedNode.FinalFields.LowLimit.issuer == txn_json.Account
+                                         && txn_json.SendMax.currency == modifiedNode.FinalFields.LowLimit.currency)
+                                         {
+                                              if(modifiedNode.PreviousFields == undefined)
+                                              {
+                                                  takerDiff = new Decimal(modifiedNode.FinalFields.Balance.value)
+                                              } else {
+                                                  takerDiff = new Decimal(modifiedNode.PreviousFields.Balance.value).minus(new Decimal(modifiedNode.FinalFields.Balance.value))
+                                              }
+                                             if(takerDiff > 0 && isNoDirectRipple == false)
+                                             {
+                                                  offerExecuted = true;
+                                             }
+                                             break;
+                                         } else if (
+                                             modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit && modifiedNode.FinalFields.HighLimit.issuer == txn_json.Account
+                                             && txn_json.SendMax.currency == modifiedNode.FinalFields.HighLimit.currency)
+                                             {
+                                                 if(modifiedNode.PreviousFields == undefined)
+                                                 {
+                                                      takerDiff = new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value))
+                                                 } else {
+                                                      takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
+                                                 }
+                                                 if(takerDiff > 0 && isNoDirectRipple == false)
+                                                 {
+                                                      offerExecuted = true;
+                                                 }
+                                                 break;
+                                             }
+                                 }
+                             }
+                             if(offerExecuted == true)
+                             {
+                                 type = 'Sell'
+                                 price = new Decimal(volume).dividedBy(takerDiff)
+                                 issuer = txn_json.SendMax.issuer;
+                                 currency = txn_json.SendMax.currency;
+                                 ticker_normalized = currency.length > 3 ? xrpl.convertHexToString(currency).replace(/\x00/g, '') : currency;
+      
+                                  //Try to get AMM info, if no pool, then fallback on priceNative
+                                  let reserveAsset0 = '0'
+                                  let reserveAsset1 = '0'
+                                  try{
+                                      if(numberOfAMMNodes == 1)
+                                          {
+                                              const highLimitTokenBalanceNode = findModifiedNodesByHighLowLimit(t, currency, ammAccount)
+                                              if(highLimitTokenBalanceNode.length == 1)
+                                              {
+                                                  const xrpAmount = new Decimal(ammXrpBalance).dividedBy(1000000)
+                                                  const tokenAmount = new Decimal(Math.abs(highLimitTokenBalanceNode[0].Balance.value))
+                                                  price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                                  reserveAsset1 = xrpAmount.toString()
+                                                  reserveAsset0 = tokenAmount.toString()
+                                              } else {
+                                                 // console.log('amm hit', numberOfAMMNodes, currency, ammAccount)
+                                                 // console.log(txn_hash)
+                                                  const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                                  if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                                  {
+                                                      const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                                      const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                                      price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                                      reserveAsset1 = xrpAmount.toString()
+                                                      reserveAsset0 = tokenAmount.toString()
+                                                  } 
+                                              }
+                                          } else if (numberOfAMMNodes > 1) {
+                                             // console.log('amm hit', numberOfAMMNodes)
+                                              const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                              if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                              {
+                                                  const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                                  const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                                  price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                                  reserveAsset1 = xrpAmount.toString()
+                                                  reserveAsset0 = tokenAmount.toString()
+                                              } 
+                                          } else {
+                                              //crosses dex and not AMM (skip)
+                                          }
+                                  } catch(err){console.log(err)}
+                     
+                                 events.push({
                                   block: {
                                   blockNumber: i,
                                   blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
                                   },
                                   eventType: 'swap',
                                   txnId: txn_hash,
-                                  txnIndex: j,
-                                  eventIndex: 0,
-                                  maker: txn_json.Account,
-                                  pairId: currency + '.' + issuer + '_XRP',
-                                  asset1In: normalizeScientificNotation(volume.toString()),
-                                  asset0Out: normalizeScientificNotation(takerDiff.toString()),
-                                  priceNative: normalizeScientificNotation(price.toString()),
-                                  reserves: {
-                                  asset0: normalizeScientificNotation(reserveAsset0),
-                                  asset1: normalizeScientificNotation(reserveAsset1)
-                                  }
-                              });
-                          } else {
-  
-                              //Try to get AMM info, if no pool, then fallback on priceNative
-                              let reserveAsset0 = '0'
-                              let reserveAsset1 = '0'
-                              try{
-                                  const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
-                                  if(ammInfo && ammInfo.result && ammInfo.result.amm)
-                                  {
-                                      const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
-                                      const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
-                                      price = new Decimal(xrpAmount).dividedBy(tokenAmount)
-                                      reserveAsset1 = xrpAmount.toString()
-                                      reserveAsset0 = tokenAmount.toString()
-                                     // console.log('AMM price: ', price)
-                                  }  
-                              } catch(err){}
-  
-                              events.push({
-                                  block: {
-                                  blockNumber: i,
-                                  blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
-                                  },
-                                  eventType: 'swap',
-                                  txnId: txn_hash,
-                                  txnIndex: j,
+                                  txnIndex: transactionIndex,
                                   eventIndex: 0,
                                   maker: txn_json.Account,
                                   pairId:  currency + '.' + issuer + '_XRP',
@@ -605,195 +835,136 @@ app.get('/events', async (req, res) => {
                                   asset1Out: normalizeScientificNotation(volume.toString()),
                                   priceNative: normalizeScientificNotation(price.toString()),
                                   reserves: {
-                                  asset0: normalizeScientificNotation(reserveAsset0),
+                                  asset0: normalizeScientificNotation(reserveAsset0), // XRPL doesn't have liquidity pools, so we can't provide this information
                                   asset1: normalizeScientificNotation(reserveAsset1)
                                   }
                               });
-                          }
-                     }
-              }
-  
-              if(txn_json.TransactionType == 'Payment' && t.meta.TransactionResult == 'tesSUCCESS')
-              {
-  
-                 let offerExecuted = false;
-                 let volume;
-                 let price;
-                 let issuer = '';
-                 let currency = '';
-                 let takerDiff;
-  
-                 if(txn_json.Account == txn_json.Destination)
-                 {
-                     if(t.meta.DeliveredAmount && typeof t.meta.DeliveredAmount == 'string' && typeof txn_json.SendMax == 'object')
-                     {
-                         volume = new Decimal(t.meta.DeliveredAmount).dividedBy(1000000);
-                         //Now find the amount of token that was exchanged
-                         const affectedNodes = t.meta.AffectedNodes
-                         for (const node of affectedNodes) {
-                             const modifiedNode = node.ModifiedNode;
-                             if(modifiedNode && modifiedNode.LedgerEntryType == 'RippleState')
-                             {
-                                 if(modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit && modifiedNode.FinalFields.LowLimit.issuer == txn_json.Account
-                                     && txn_json.SendMax.currency == modifiedNode.FinalFields.LowLimit.currency)
+      
+                             }
+      
+                         } else if (t.meta.DeliveredAmount && typeof t.meta.DeliveredAmount == 'object' && typeof txn_json.SendMax == 'string')
+                         {
+                            takerDiff = new Decimal(t.meta.DeliveredAmount.value)
+                             //Now find the amount of token that was exchanged
+                             const affectedNodes = t.meta.AffectedNodes
+                             for (const node of affectedNodes) {
+                                 const modifiedNode = node.ModifiedNode;
+                                 if(modifiedNode && modifiedNode.LedgerEntryType == 'AccountRoot')
+                                 {
+                                     if(modifiedNode.FinalFields && modifiedNode.FinalFields.Account == txn_json.Account)
                                      {
-                                         takerDiff = new Decimal(modifiedNode.PreviousFields.Balance.value).minus(new Decimal(modifiedNode.FinalFields.Balance.value))
-                                         if(takerDiff > 0 && isNoDirectRipple == false)
+                                          if(modifiedNode.PreviousFields == undefined)
+                                          {
+                                              volume = new Decimal(modifiedNode.FinalFields.Balance).minus(new Decimal(txn_json.Fee))
+                                          } else {
+                                              volume = new Decimal(modifiedNode.PreviousFields.Balance).minus(new Decimal(modifiedNode.FinalFields.Balance)).minus(new Decimal(txn_json.Fee))
+                                          }
+      
+                                         volume = new Decimal(volume).dividedBy(1000000)
+                                         //Only show executed where volume is greater than 0
+                                         if(volume > 0 && isNoDirectRipple == false)
                                          {
                                               offerExecuted = true;
                                          }
                                          break;
-                                     } else if (
-                                         modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit && modifiedNode.FinalFields.HighLimit.issuer == txn_json.Account
-                                         && txn_json.SendMax.currency == modifiedNode.FinalFields.HighLimit.currency)
-                                         {
-                                             takerDiff = new Decimal(Math.abs(modifiedNode.PreviousFields.Balance.value)).minus(new Decimal(Math.abs(modifiedNode.FinalFields.Balance.value)))
-                                             if(takerDiff > 0 && isNoDirectRipple == false)
-                                             {
-                                                  offerExecuted = true;
-                                             }
-                                             break;
-                                         }
-                             }
-                         }
-                         if(offerExecuted == true)
-                         {
-                             type = 'Sell'
-                             price = new Decimal(volume).dividedBy(takerDiff)
-                             issuer = txn_json.SendMax.issuer;
-                             currency = txn_json.SendMax.currency;
-                             ticker_normalized = currency.length > 3 ? xrpl.convertHexToString(currency).replace(/\x00/g, '') : currency;
-  
-                              //Try to get AMM info, if no pool, then fallback on priceNative
-                              let reserveAsset0 = '0'
-                              let reserveAsset1 = '0'
-                              try{
-                                  const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
-                                  if(ammInfo && ammInfo.result && ammInfo.result.amm)
-                                  {
-                                      const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
-                                      const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
-                                      price = new Decimal(xrpAmount).dividedBy(tokenAmount)
-                                      reserveAsset1 = xrpAmount.toString()
-                                      reserveAsset0 = tokenAmount.toString()
-                                     // console.log('AMM price: ', price)
-                                    //  console.log(typeof reserveAsset1, typeof reserveAsset0)
-                                  }  
-                              } catch(err){}
-                 
-                             events.push({
-                              block: {
-                              blockNumber: i,
-                              blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
-                              },
-                              eventType: 'swap',
-                              txnId: txn_hash,
-                              txnIndex: j,
-                              eventIndex: 0,
-                              maker: txn_json.Account,
-                              pairId:  currency + '.' + issuer + '_XRP',
-                              asset0In: normalizeScientificNotation(takerDiff.toString()),
-                              asset1Out: normalizeScientificNotation(volume.toString()),
-                              priceNative: normalizeScientificNotation(price.toString()),
-                              reserves: {
-                              asset0: normalizeScientificNotation(reserveAsset0), // XRPL doesn't have liquidity pools, so we can't provide this information
-                              asset1: normalizeScientificNotation(reserveAsset1)
-                              }
-                          });
-  
-                         }
-  
-                     } else if (t.meta.DeliveredAmount && typeof t.meta.DeliveredAmount == 'object' && typeof txn_json.SendMax == 'string')
-                     {
-                        takerDiff = new Decimal(t.meta.DeliveredAmount.value)
-                         //Now find the amount of token that was exchanged
-                         const affectedNodes = t.meta.AffectedNodes
-                         for (const node of affectedNodes) {
-                             const modifiedNode = node.ModifiedNode;
-                             if(modifiedNode && modifiedNode.LedgerEntryType == 'AccountRoot')
-                             {
-                                 if(modifiedNode.FinalFields && modifiedNode.FinalFields.Account == txn_json.Account)
-                                 {
-                                     volume = new Decimal(modifiedNode.PreviousFields.Balance).minus(new Decimal(modifiedNode.FinalFields.Balance)).minus(new Decimal(txn_json.Fee))
-                                     volume = new Decimal(volume).dividedBy(1000000)
-                                     //Only show executed where volume is greater than 0
-                                     if(volume > 0 && isNoDirectRipple == false)
-                                     {
-                                          offerExecuted = true;
                                      }
-                                     break;
                                  }
                              }
+                             if(offerExecuted == true)
+                             {
+                                 type = 'Buy'
+                                 price = new Decimal(volume).dividedBy(takerDiff)
+                                 issuer = t.meta.DeliveredAmount.issuer;
+                                 currency = t.meta.DeliveredAmount.currency;
+                                 ticker_normalized = currency.length > 3 ? xrpl.convertHexToString(currency).replace(/\x00/g, '') : currency;
+      
+                                  //Try to get AMM info, if no pool, then fallback on priceNative
+                                  let reserveAsset0 = '0'
+                                  let reserveAsset1 = '0'
+                                  try{
+                                      if(numberOfAMMNodes == 1)
+                                          {
+                                              const highLimitTokenBalanceNode = findModifiedNodesByHighLowLimit(t, currency, ammAccount)
+                                              if(highLimitTokenBalanceNode.length == 1)
+                                              {
+                                                  const xrpAmount = new Decimal(ammXrpBalance).dividedBy(1000000)
+                                                  const tokenAmount = new Decimal(Math.abs(highLimitTokenBalanceNode[0].Balance.value))
+                                                  price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                                  reserveAsset1 = xrpAmount.toString()
+                                                  reserveAsset0 = tokenAmount.toString()
+                                              } else {
+                                                 // console.log('amm hit', numberOfAMMNodes, currency, ammAccount)
+                                                 // console.log(txn_hash)
+                                                  const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                                  if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                                  {
+                                                      const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                                      const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                                      price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                                      reserveAsset1 = xrpAmount.toString()
+                                                      reserveAsset0 = tokenAmount.toString()
+                                                  } 
+                                              }
+                                          } else if (numberOfAMMNodes > 1) {
+                                              //console.log('amm hit', numberOfAMMNodes)
+                                              const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                              if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                              {
+                                                  const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                                  const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                                  price = new Decimal(xrpAmount).dividedBy(tokenAmount)
+                                                  reserveAsset1 = xrpAmount.toString()
+                                                  reserveAsset0 = tokenAmount.toString()
+                                              } 
+                                          } else {
+                                              //crosses dex and not AMM (skip)
+                                          }
+                                  } catch(err){console.log(err)}
+      
+                                 events.push({
+                                  block: {
+                                  blockNumber: i,
+                                  blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
+                                  },
+                                  eventType: 'swap',
+                                  txnId: txn_hash,
+                                  txnIndex: transactionIndex,
+                                  eventIndex: 0,
+                                  maker: txn_json.Account,
+                                  pairId: currency + '.' + issuer + '_XRP',
+                                  asset1In: normalizeScientificNotation(volume.toString()),
+                                  asset0Out: normalizeScientificNotation(takerDiff.toString()),
+                                  priceNative: normalizeScientificNotation(price.toString()),
+                                  reserves: {
+                                  asset0: reserveAsset0, // XRPL doesn't have liquidity pools, so we can't provide this information
+                                  asset1: reserveAsset1
+                                  }
+                              });
+      
+                             }
+      
+      
                          }
-                         if(offerExecuted == true)
-                         {
-                             type = 'Buy'
-                             price = new Decimal(volume).dividedBy(takerDiff)
-                             issuer = t.meta.DeliveredAmount.issuer;
-                             currency = t.meta.DeliveredAmount.currency;
-                             ticker_normalized = currency.length > 3 ? xrpl.convertHexToString(currency).replace(/\x00/g, '') : currency;
-  
-                              //Try to get AMM info, if no pool, then fallback on priceNative
-                              let reserveAsset0 = '0'
-                              let reserveAsset1 = '0'
-                              try{
-                                  const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
-                                  if(ammInfo && ammInfo.result && ammInfo.result.amm)
-                                  {
-                                      const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
-                                      const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
-                                      price = new Decimal(xrpAmount).dividedBy(tokenAmount)
-                                      reserveAsset1 = xrpAmount.toString()
-                                      reserveAsset0 = tokenAmount.toString()
-                                    //  console.log('AMM price: ', price)
-                                  }  
-                              } catch(err){}
-  
-                             events.push({
-                              block: {
-                              blockNumber: i,
-                              blockTimestamp: xrpl.rippleTimeToUnixTime(txns.result.ledger.close_time) / 1000
-                              },
-                              eventType: 'swap',
-                              txnId: txn_hash,
-                              txnIndex: j,
-                              eventIndex: 0,
-                              maker: txn_json.Account,
-                              pairId: currency + '.' + issuer + '_XRP',
-                              asset1In: normalizeScientificNotation(volume.toString()),
-                              asset0Out: normalizeScientificNotation(takerDiff.toString()),
-                              priceNative: normalizeScientificNotation(price.toString()),
-                              reserves: {
-                              asset0: reserveAsset0, // XRPL doesn't have liquidity pools, so we can't provide this information
-                              asset1: reserveAsset1
-                              }
-                          });
-  
-                         }
-  
-  
                      }
-                 }
-              }
-  
-  
+                  }
+      
+      
+            }
+          }
+          res.json({ events });
+        } catch (error) {
+          console.error('Error fetching events:', error);
+          res.status(500).json({ error: 'Internal server error' });
+        } finally
+        {
+          if(client.isConnected)
+          {
+              try{
+                  await client.disconnect()
+              } catch(err){}
+          }
         }
-      }
-  
-      res.json({ events });
-    } catch (error) {
-      console.error('Error fetching events:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    } finally
-    {
-      if(client.isConnected)
-      {
-          try{
-              await client.disconnect()
-          } catch(err){}
-      }
-    }
-  });
+      });
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
