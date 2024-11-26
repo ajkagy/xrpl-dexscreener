@@ -358,7 +358,6 @@ const client = new xrpl.Client(xrpl_node);
             {
                 "command": "account_tx",
                 "account": baseIssuer == 'XRP' || baseCurrency == 'XRP' ? quoteIssuer : baseIssuer,
-                "ledger_index_min": 32570,
                 "limit": 1,
                 "forward": true
               });
