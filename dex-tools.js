@@ -17,6 +17,78 @@ function returnError(errorCode, message)
       }
 }
 
+function findModifiedNodesByHighLowLimit(txn, targetCurrency, targetIssuer) {
+    // Validate the transaction object
+    if (!txn || typeof txn !== 'object') {
+        console.error("Invalid transaction object provided.");
+        return [];
+    }
+
+    // Ensure that the transaction has meta and AffectedNodes
+    if (!txn.meta || !Array.isArray(txn.meta.AffectedNodes)) {
+        console.warn("Transaction metadata or AffectedNodes not found.");
+        return [];
+    }
+
+    // Destructure AffectedNodes for easier access
+    const { AffectedNodes } = txn.meta;
+
+    // Initialize an array to hold matching FinalFields
+    const matchingFinalFields = [];
+
+    // Iterate through each node in AffectedNodes
+  //  console.log(AffectedNodes)
+    AffectedNodes.forEach(node => {
+        // We're only interested in ModifiedNodes
+        if (node.ModifiedNode && node.ModifiedNode.LedgerEntryType && node.ModifiedNode.LedgerEntryType == 'RippleState') {
+            const modifiedNode = node.ModifiedNode;
+
+            if (modifiedNode.FinalFields && modifiedNode.FinalFields.HighLimit) {
+                const { HighLimit } = modifiedNode.FinalFields;
+
+                // Compare HighLimit.currency and HighLimit.issuer with target values
+                if (HighLimit.currency === targetCurrency && HighLimit.issuer === targetIssuer) {
+                    // If match found, push the FinalFields to the result array
+                   // console.log('found high limit')
+                    matchingFinalFields.push(modifiedNode.FinalFields);
+                }
+            }
+
+            if (modifiedNode.FinalFields && modifiedNode.FinalFields.LowLimit) {
+                const { LowLimit } = modifiedNode.FinalFields;
+
+                // Compare HighLimit.currency and HighLimit.issuer with target values
+                if (LowLimit.currency === targetCurrency && LowLimit.issuer === targetIssuer) {
+                    // If match found, push the FinalFields to the result array
+                   // console.log('found low limit')
+                    matchingFinalFields.push(modifiedNode.FinalFields);
+                }
+            }
+        }
+    });
+   // console.log(matchingFinalFields)
+    return matchingFinalFields;
+}
+
+function findAMMIDModifiedNodes(txn) {
+    // Ensure that the transaction has meta and AffectedNodes
+    if (!txn.meta || !Array.isArray(txn.meta.AffectedNodes)) {
+        console.warn("Transaction metadata or AffectedNodes not found.");
+        return [];
+    }
+
+    // Filter through AffectedNodes to find ModifiedNodes
+    const modifiedNodes = txn.meta.AffectedNodes.filter(node => node.ModifiedNode);
+
+    // Further filter to find nodes where FinalFields contain 'AMMID'
+    const ammNodes = modifiedNodes.filter(node => {
+        const finalFields = node.ModifiedNode.FinalFields;
+        return finalFields && finalFields.AMMID;
+    });
+
+    return ammNodes;
+}
+
 function checktfNoRippleDirectEnabled(flagValue) {
     const flags = {
         tfNoRippleDirect: 65536n,
