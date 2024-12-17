@@ -669,7 +669,15 @@ app.get('/events', async (req, res) => {
                                         reserveAsset0 = tokenAmount.toString()
                                     } 
                                 } else {
-                                    //crosses dex and not AMM (skip)
+                                    //crosses dex and not AMM pull reserve amounts
+                                    const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                    if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                    {
+                                        const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                        const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                        reserveAsset1 = xrpAmount.toString()
+                                        reserveAsset0 = tokenAmount.toString()
+                                    } 
                                 }
                             } catch(err){console.log(err)}
 
@@ -733,7 +741,15 @@ app.get('/events', async (req, res) => {
                                         reserveAsset0 = tokenAmount.toString()
                                     } 
                                 } else {
-                                    //crosses dex and not AMM (skip)
+                                        //crosses dex and not AMM pull reserve amounts
+                                        const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                        if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                        {
+                                            const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                            const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                            reserveAsset1 = xrpAmount.toString()
+                                            reserveAsset0 = tokenAmount.toString()
+                                        } 
                                 }
                             } catch(err){console.log(err)}
 
@@ -860,7 +876,15 @@ app.get('/events', async (req, res) => {
                                             reserveAsset0 = tokenAmount.toString()
                                         } 
                                     } else {
-                                        //crosses dex and not AMM (skip)
+                                        //crosses dex and not AMM pull reserve amounts
+                                        const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                        if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                        {
+                                            const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                            const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                            reserveAsset1 = xrpAmount.toString()
+                                            reserveAsset0 = tokenAmount.toString()
+                                        } 
                                     }
                             } catch(err){console.log(err)}
                
@@ -961,7 +985,15 @@ app.get('/events', async (req, res) => {
                                             reserveAsset0 = tokenAmount.toString()
                                         } 
                                     } else {
-                                        //crosses dex and not AMM (skip)
+                                        //crosses dex and not AMM pull reserve amounts
+                                        const ammInfo = await client.request(ammInfoRequest(issuer, currency, i));
+                                        if(ammInfo && ammInfo.result && ammInfo.result.amm)
+                                        {
+                                            const xrpAmount = new Decimal(ammInfo.result.amm.amount).dividedBy(1000000)
+                                            const tokenAmount = new Decimal(ammInfo.result.amm.amount2.value)
+                                            reserveAsset1 = xrpAmount.toString()
+                                            reserveAsset0 = tokenAmount.toString()
+                                        } 
                                     }
                             } catch(err){console.log(err)}
 
