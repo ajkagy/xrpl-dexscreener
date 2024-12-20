@@ -17,6 +17,21 @@ function returnError(errorCode, message)
       }
 }
 
+function ammInfoRequest(issuer, currency, ledger_index)
+{
+    return {
+        "command": "amm_info",
+        "ledger_index": ledger_index,
+        "asset": {
+          "currency": "XRP"
+        },
+        "asset2": {
+          "currency": currency,
+          "issuer": issuer
+        }
+    }
+}
+
 function findModifiedNodesByHighLowLimit(txn, targetCurrency, targetIssuer) {
     // Validate the transaction object
     if (!txn || typeof txn !== 'object') {
